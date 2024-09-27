@@ -3,11 +3,10 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { io, Socket } from 'socket.io-client'
 import { Device } from 'mediasoup-client'
-import { MicOff, Mic } from 'lucide-react'
+import { ClipboardCopy } from 'lucide-react';
 
 interface Peer {
   id: string;
-  muted: boolean;
 }
 
 export default function Home() {
@@ -16,7 +15,6 @@ export default function Home() {
   const [peers, setPeers] = useState<Peer[]>([])
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [joinRoomId, setJoinRoomId] = useState('')
-  const [localMuted, setLocalMuted] = useState(false)
   const socketRef = useRef<Socket | null>(null)
   const deviceRef = useRef<Device | null>(null)
   const producerTransportRef = useRef<any>(null)
@@ -40,9 +38,9 @@ export default function Home() {
       setIsConnected(false)
     })
 
-    socketRef.current.on('peerJoined', ({ peerId, muted }) => {
+    socketRef.current.on('peerJoined', ({ peerId }) => {
       console.log('New peer joined:', peerId)
-      setPeers(prevPeers => [...prevPeers, { id: peerId, muted }])
+      setPeers(prevPeers => [...prevPeers, { id: peerId }])
     })
 
     socketRef.current.on('peerLeft', ({ peerId }) => {
@@ -61,11 +59,8 @@ export default function Home() {
       }
     })
 
-    socketRef.current.on('newProducer', async ({ producerId, producerPeerId, muted }) => {
+    socketRef.current.on('newProducer', async ({ producerId, producerPeerId }) => {
       console.log('New producer available:', producerId, 'from peer:', producerPeerId)
-      setPeers(prevPeers => prevPeers.map(peer => 
-        peer.id === producerPeerId ? { ...peer, muted } : peer
-      ))
       await consume(producerId, producerPeerId)
     })
 
@@ -78,16 +73,10 @@ export default function Home() {
       }
     })
 
-    socketRef.current.on('peerMuted', ({ peerId, muted }) => {
-      setPeers(prevPeers => prevPeers.map(peer => 
-        peer.id === peerId ? { ...peer, muted } : peer
-      ))
-    })
-
     return () => {
       console.log('Cleaning up...')
       socketRef.current?.disconnect()
-      
+
       remoteVideosRef.current.forEach((videoElement, peerId) => {
         videoElement.srcObject = null
         videoElement.remove()
@@ -249,27 +238,19 @@ export default function Home() {
       console.error('Failed to consume:', error)
     }
   }
-
-  const toggleLocalMute = () => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0]
-      audioTrack.enabled = !audioTrack.enabled
-      setLocalMuted(!audioTrack.enabled)
-      socketRef.current?.emit('toggleMute', { muted: !audioTrack.enabled })
-    }
-  }
-
-  const toggleRemotePeerMute = (peerId: string) => {
-    socketRef.current?.emit('toggleRemotePeerMute', { peerId })
+  const copyRoomId = () => {
+    navigator.clipboard.writeText(roomId).then(() => {
+      alert('Room ID copied to clipboard!');
+    });
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
-      <header className="bg-blue-600 text-white p-4">
+    <div className="flex flex-col h-screen bg-gray-900 text-white">
+      <header className="bg-blue-600 p-4">
         <h1 className="text-2xl font-bold">Multi-user Video Calling App</h1>
       </header>
 
-      <div className="flex-none p-4 bg-white shadow">
+      <div className="flex-none p-4 bg-gray-800">
         <div className="flex items-center space-x-4">
           <button
             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
@@ -282,7 +263,7 @@ export default function Home() {
             value={joinRoomId}
             onChange={(e) => setJoinRoomId(e.target.value)}
             placeholder="Enter Room ID"
-            className="border rounded py-2 px-4 flex-grow"
+            className="border rounded py-2 px-4 flex-grow bg-gray-700 text-white"
           />
           <button
             className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
@@ -291,54 +272,52 @@ export default function Home() {
             Join Room
           </button>
         </div>
-        <div className="mt-2 text-sm text-gray-600">
+        <div className="mt-2 text-sm">
           <p>Connection status: {isConnected ? 'Connected' : 'Disconnected'}</p>
-          <p>Room ID: {roomId || 'Not in a room'}</p>
+          <div className="flex items-center">
+            <p>Room ID: {roomId || 'Not in a room'}</p>
+            {roomId && (
+              <button
+                onClick={copyRoomId}
+                className="ml-2 p-1 rounded hover:bg-gray-700"
+                title="Copy Room ID"
+              >
+                <ClipboardCopy size={16} />
+              </button>
+            )}
+          </div>
           <p>Number of peers: {peers.length}</p>
         </div>
       </div>
 
       <div className="flex-grow p-4 overflow-y-auto">
-        <div id="remoteVideos" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div id="remoteVideos" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {peers.map((peer) => (
-            <div key={peer.id} className="relative aspect-video">
-              <video
-                ref={(el) => {
-                  if (el) remoteVideosRef.current.set(peer.id, el)
-                }}
-                autoPlay
-                playsInline
-                className="w-full h-full object-cover rounded-lg shadow-lg"
-              />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <button
-                  onClick={() => toggleRemotePeerMute(peer.id)}
-                  className="bg-black bg-opacity-50 rounded-full p-2"
-                >
-                  {peer.muted ? <MicOff className="text-white w-6 h-6" /> : <Mic className="text-white w-6 h-6" />}
-                </button>
-              </div>
-            </div>
+
+            <video
+              key={peer.id}
+              ref={(el) => {
+                if (el) remoteVideosRef.current.set(peer.id, el)
+              }}
+              autoPlay
+              playsInline
+              className="absolute inset-0 w-full h-full object-cover"
+            />
           ))}
         </div>
       </div>
 
-      <div className="flex-none p-4 bg-gray-200">
-        <div className="relative w-48 h-36 mx-auto">
+      <div className="flex-none p-4 bg-gray-800">
+        <div className="relative aspect-video w-64 mx-auto bg-gray-700 rounded-lg overflow-hidden">
           <video
             ref={localVideoRef}
             autoPlay
             playsInline
             muted
-            className="w-full h-full object-cover rounded-lg shadow-lg"
+            className="absolute inset-0 w-full h-full object-cover"
           />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <button
-              onClick={toggleLocalMute}
-              className="bg-black bg-opacity-50 rounded-full p-2"
-            >
-              {localMuted ? <MicOff className="text-white w-6 h-6" /> : <Mic className="text-white w-6 h-6" />}
-            </button>
+          <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 text-xs rounded">
+            You
           </div>
         </div>
       </div>
